@@ -7,7 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f0f2f5; font-family: 'Sarabun', sans-serif; }
-        .calculator-card { max-width: 600px; margin: 30px auto; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border: none; }
+        .calculator-card { max-width: 650px; margin: 30px auto; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border: none; }
         .btn-calculate { background: linear-gradient(45deg, #007bff, #0056b3); border: none; padding: 12px; font-weight: bold; }
         .result-box { display: none; border-radius: 15px; }
         .badge-custom { font-size: 0.9rem; padding: 8px 15px; border-radius: 50px; }
@@ -24,107 +24,119 @@
         
         <div class="mb-3">
             <label class="form-label fw-bold">เลือกรายการยา:</label>
-            <select class="form-select" id="drugSelect" onchange="toggleMode()">
+            <select class="form-select border-primary" id="drugSelect" onchange="updateUI()">
+                <option value="norepi">Norepinephrine (Levophed) [4 mg/250 mL]</option>
+                <option value="dopamine">Dopamine [250 mg/250 mL]</option>
+                <option value="nicardipine">Nicardipine [25 mg/250 mL]</option>
                 <option value="phenytoin_load">Phenytoin (Loading Dose)</option>
-                <option value="phenytoin_maint">Phenytoin (Maintenance Dose)</option>
             </select>
         </div>
 
         <div class="mb-3">
             <label class="form-label fw-bold">น้ำหนักผู้ป่วย (kg):</label>
-            <input type="number" class="form-control form-control-lg" id="patientWeight" placeholder="กรอกน้ำหนัก...">
+            <input type="number" class="form-control form-control-lg" id="patientWeight" placeholder="เช่น 60">
         </div>
 
-        <div class="mb-4" id="doseSection">
-            <label class="form-label fw-bold" id="doseLabel">ขนาดยา (mg/kg):</label>
-            <select class="form-select form-select-lg" id="doseValue">
-                </select>
+        <div class="mb-4">
+            <label class="form-label fw-bold" id="doseLabel">ขนาดยา (mcg/kg/min):</label>
+            <input type="number" step="0.01" class="form-control form-control-lg" id="doseValue" placeholder="ระบุขนาดยาที่แพทย์สั่ง">
+            <small class="text-muted" id="doseHint">แนะนำเริ่มต้น: 0.05 - 0.1 mcg/kg/min</small>
         </div>
 
         <button class="btn btn-primary w-100 fs-5 btn-calculate shadow-sm" onclick="calculate()">คำนวณอัตราการให้ยา</button>
 
         <div id="resultSection" class="result-box mt-4 p-3 border bg-white shadow-sm">
             <div class="text-center">
-                <p class="mb-1 text-muted fw-bold">ผลการคำนวณสำหรับ <span id="resMode" class="text-primary"></span></p>
-                <h2 class="text-success fw-bold"><span id="totalDose"></span> mg</h2>
-                <div id="rateInfo" class="mt-2"></div>
+                <p class="mb-1 text-muted fw-bold">ตั้งค่า Infusion Pump (Rate)</p>
+                <h1 class="text-success fw-bold" id="mainResult">--</h1>
+                <h5 class="text-primary mt-2" id="subResult"></h5>
             </div>
             
             <div class="alert alert-warning mt-3 border-0" style="background-color: #fff9e6;">
-                <h6 class="fw-bold"><i class="bi bi-exclamation-triangle"></i> ข้อมูลการบริหารยา:</h6>
-                <ul class="mb-0 small" id="drugNotes"></ul>
+                <h6 class="fw-bold text-dark"><i class="bi bi-exclamation-triangle"></i> ข้อมูลการผสมยา (Standard Concentration):</h6>
+                <ul class="mb-0 small text-dark" id="drugNotes"></ul>
             </div>
         </div>
     </div>
-    <p class="text-center text-muted small">© 2026 กุดหว้าสหคลินิก - พัฒนาเพื่อสนับสนุนงานบริบาลทางเภสัชกรรม</p>
 </div>
 
 <script>
-    // ฟังก์ชันเปลี่ยนตัวเลือกขนาดยาตามโหมดที่เลือก
-    function toggleMode() {
-        const mode = document.getElementById('drugSelect').value;
-        const doseValue = document.getElementById('doseValue');
-        const doseLabel = document.getElementById('doseLabel');
-        
-        doseValue.innerHTML = ""; // ล้างค่าเก่า
-        
-        if (mode === "phenytoin_load") {
-            doseLabel.innerText = "ขนาดยา Loading (mg/kg):";
-            const options = [15, 18, 20];
-            options.forEach(opt => {
-                doseValue.innerHTML += `<option value="${opt}">${opt} mg/kg</option>`;
-            });
-        } else {
-            doseLabel.innerText = "ขนาดยา Maintenance (mg/kg/day):";
-            const options = [4, 5, 6, 7];
-            options.forEach(opt => {
-                doseValue.innerHTML += `<option value="${opt}">${opt} mg/kg/day</option>`;
-            });
+    // ข้อมูลยาแต่ละตัว
+    const drugData = {
+        norepi: {
+            label: "ขนาดยา (mcg/kg/min):",
+            hint: "Dose ปกติ: 0.01 - 1 mcg/kg/min (Max: 3 mcg/kg/min)",
+            conc_mcg_ml: 16, // 4 mg ใน 250 mL = 4000 mcg / 250 = 16 mcg/mL
+            notes: "<li>สูตรมาตรฐาน: 4 mg (1 amp) + 5%D/W จนครบ 250 mL</li><li>ความเข้มข้น: 16 mcg/mL</li><li>ระวัง Extravasation (อาจเกิด Tissue necrosis)</li>"
+        },
+        dopamine: {
+            label: "ขนาดยา (mcg/kg/min):",
+            hint: "Renal/Cardiac Dose: 2 - 10 mcg/kg/min | Vasopressor: 10 - 20 mcg/kg/min",
+            conc_mcg_ml: 1000, // 250 mg ใน 250 mL = 250,000 mcg / 250 = 1000 mcg/mL
+            notes: "<li>สูตรมาตรฐาน: 250 mg (1 amp) + 5%D/W หรือ NSS จนครบ 250 mL</li><li>ความเข้มข้น: 1 mg/mL (1000 mcg/mL)</li><li>ห้ามผสมในสารละลายที่เป็นด่าง (เช่น NaHCO3)</li>"
+        },
+        nicardipine: {
+            label: "ขนาดยา (mcg/kg/min):",
+            hint: "Dose เริ่มต้น: 0.5 - 1 mcg/kg/min (Max: 15 mcg/kg/min)",
+            conc_mcg_ml: 100, // 25 mg ใน 250 mL = 25,000 mcg / 250 = 100 mcg/mL
+            notes: "<li>สูตรมาตรฐาน: 25 mg (2.5 amps) + 5%D/W หรือ NSS จนครบ 250 mL</li><li>ความเข้มข้น: 0.1 mg/mL (100 mcg/mL)</li><li>ควรเปลี่ยนขวดใหม่ทุก 24 ชั่วโมง</li>"
+        },
+        phenytoin_load: {
+            label: "ขนาดยา Loading (mg/kg):",
+            hint: "Dose มาตรฐาน: 15 - 20 mg/kg",
+            conc_mcg_ml: 0, // ไม่ได้ใช้สูตร Rate mL/hr
+            notes: "<li>ผสมใน <strong>NSS เท่านั้น</strong> ห้ามผสม D5W (ยาตกตะกอน)</li><li>Max Rate: ห้ามดริปเร็วกว่า 50 mg/min</li><li>ต้องใช้ In-line filter เสมอ</li>"
         }
-        // ซ่อนผลลัพธ์เก่าเมื่อเปลี่ยนโหมด
+    };
+
+    // อัปเดตหน้าจอเมื่อเปลี่ยนยา
+    function updateUI() {
+        const drug = document.getElementById('drugSelect').value;
+        document.getElementById('doseLabel').innerText = drugData[drug].label;
+        document.getElementById('doseHint').innerText = drugData[drug].hint;
+        document.getElementById('drugNotes').innerHTML = drugData[drug].notes;
+        
+        // ซ่อนกล่องผลลัพธ์
         document.getElementById('resultSection').style.display = 'none';
+        document.getElementById('doseValue').value = ''; 
     }
 
+    // ฟังก์ชันคำนวณหลัก
     function calculate() {
-        const mode = document.getElementById('drugSelect').value;
+        const drug = document.getElementById('drugSelect').value;
         const weight = parseFloat(document.getElementById('patientWeight').value);
         const dose = parseFloat(document.getElementById('doseValue').value);
 
-        if (!weight || weight <= 0) {
-            alert("กรุณากรอกน้ำหนักก่อนครับ");
+        if (!weight || !dose) {
+            alert("กรุณากรอกข้อมูลน้ำหนักและขนาดยาให้ครบถ้วนครับ");
             return;
         }
 
-        const totalDose = weight * dose;
-        let rateHtml = "";
-        let notesHtml = "";
+        let mainText = "";
+        let subText = "";
 
-        if (mode === "phenytoin_load") {
-            const minTime = Math.ceil(totalDose / 50);
-            const nssVol = Math.ceil(totalDose / 10);
-            document.getElementById('resMode').innerText = "Loading Dose";
-            rateHtml = `<h5 class="text-danger fw-bold">ดริปขั้นต่ำ: ${minTime} นาที</h5>
-                        <p class="small text-muted">ผสมใน NSS อย่างน้อย ${nssVol} mL</p>`;
-            notesHtml = `<li>Fluid: <strong>NSS เท่านั้น</strong></li>
-                         <li>Rate: ห้ามเกิน 50 mg/min</li>
-                         <li>ต้องใช้ In-line filter (0.22-0.52 micron)</li>`;
+        // สูตรคำนวณแยกตามประเภทยา
+        if (drug === "phenytoin_load") {
+            const totalDose = weight * dose;
+            const minTime = Math.ceil(totalDose / 50); // Rate limit 50mg/min
+            mainText = `${totalDose.toLocaleString()} mg`;
+            subText = `เวลาในการดริปขั้นต่ำ: ${minTime} นาที`;
         } else {
-            document.getElementById('resMode').innerText = "Maintenance Dose";
-            rateHtml = `<h5 class="text-info fw-bold">ขนาดยารวมต่อวัน</h5>
-                        <p class="small text-muted">แบ่งให้วันละ 2-3 ครั้ง ตามดุลพินิจ</p>`;
-            notesHtml = `<li>สามารถให้แบบ Oral หรือ IV Slow Push ได้</li>
-                         <li>หากให้ IV: อัตราการฉีดห้ามเกิน 25-50 mg/min</li>
-                         <li>ติดตามระดับยาในเลือด (Therapeutic Range: 10-20 mcg/mL)</li>`;
+            // สูตรคำนวณ Rate (mL/hr) = (Dose * Weight * 60) / Concentration
+            const conc = drugData[drug].conc_mcg_ml;
+            const rate = (dose * weight * 60) / conc;
+            
+            mainText = `${rate.toFixed(1)} mL/hr`;
+            subText = `ขนาดยารวม: ${(dose * weight).toFixed(1)} mcg/min`;
         }
 
-        document.getElementById('totalDose').innerText = totalDose.toLocaleString();
-        document.getElementById('rateInfo').innerHTML = rateHtml;
-        document.getElementById('drugNotes').innerHTML = notesHtml;
+        document.getElementById('mainResult').innerText = mainText;
+        document.getElementById('subResult').innerText = subText;
         document.getElementById('resultSection').style.display = 'block';
     }
 
-    // รันครั้งแรกเพื่อตั้งค่าเริ่มต้น
-    toggleMode();
+    // โหลด UI ค่าเริ่มต้น
+    updateUI();
 </script>
 </body>
 </html>
